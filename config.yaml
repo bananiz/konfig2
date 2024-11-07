@@ -1,0 +1,4 @@
+visualizer_path: "/usr/local/bin/mmdc"  # Путь к программе для визуализации графов
+repository_path: "/Users/banani/PycharmProjects/pythonProject3/teapla"  # Путь к репозиторию
+output_path: "/Users/banani/output/commit_graph.md"  # Путь для сохранения результата
+file_hash: "/Users/banani/PycharmProjects/pythonProject3/teapla/README.md"
