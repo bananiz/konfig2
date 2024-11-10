@@ -7,7 +7,7 @@ from visualizer import get_commits_with_file, build_dependency_graph
 class TestVisualizer(unittest.TestCase):
     def setUp(self):
         """Загружаем конфигурацию из файла и определяем необходимые переменные."""
-        self.config_path = '/config.yaml'
+        self.config_path = 'config.yaml'
         self.config = self.load_config(self.config_path)
 
         # Параметры из конфигурации
