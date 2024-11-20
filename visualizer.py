@@ -1,7 +1,6 @@
-import subprocess
-import yaml
 import os
-
+import zlib
+import yaml
 
 def load_config(config_path):
     """Загружает конфигурацию из YAML файла."""
@@ -11,41 +10,82 @@ def load_config(config_path):
         print(config)
         return config
 
+def decompress_object(data):
+    """Разжимает объект Git."""
+    decompressed = zlib.decompress(data)
+    header, _, body = decompressed.partition(b'\x00')
+    return body.decode('utf-8', errors='ignore')
 
-def get_commits_with_file(repository_path, file_hash_or_path):
-    """Получает коммиты, связанные с файлом, по его хешу или пути."""
+def get_commit_info(repository_path, commit_hash):
+    """Получает информацию о коммите по его хешу."""
     print(f"Repository Path: {repository_path}")
-    print(f"File Hash/Path: {file_hash_or_path}")
+    print(f"Commit Hash: {commit_hash}")
 
-    # Формируем команду для git log
-    command = [
-        'git', '-C', repository_path, 'log', '--pretty=format:%H|%an|%ad', '--date=iso', '--', file_hash_or_path
-    ]
+    # Формируем путь к объекту коммита
+    object_dir = os.path.join(repository_path, '.git', 'objects', commit_hash[:2])
+    object_file = os.path.join(object_dir, commit_hash[2:])
 
-    # Печатаем команду для дебага
-    print(f"Running command: {' '.join(command)}")
+    if not os.path.exists(object_file):
+        print(f"Error: The commit object {object_file} does not exist.")
+        return None
 
-    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    # Читаем и разжимаем объект коммита
+    with open(object_file, 'rb') as f:
+        data = f.read()
+        commit_content = decompress_object(data)
 
-    if result.stderr:
-        print(f"Error: {result.stderr}")
+    print(f"Commit content:\n{commit_content}")
 
-    print(f"Git log output:\n{result.stdout}")
+    # Извлекаем информацию о коммите
+    lines = commit_content.split('\n')
+    commit_info = {
+        'hash': commit_hash,
+        'author': '',
+        'date': '',
+        'message': ''
+    }
 
-    if not result.stdout.strip():
-        print("Git log returned no output. Please check the file path and hash.")
+    for line in lines:
+        if line.startswith('author'):
+            commit_info['author'] = line.split(' ', 1)[1]
+        elif line.startswith('date'):
+            commit_info['date'] = line.split(' ', 1)[1]
+        elif line.startswith('    '):
+            commit_info['message'] += line.strip() + '\n'
 
-    commits = result.stdout.strip().split('\n')
-    print(f"Total commits found: {len(commits)}")
+    return (commit_info['hash'], commit_info['author'], commit_info['date'])
 
-    valid_commits = [line.split('|') for line in commits if len(line.split('|')) == 3]
+def get_commits_with_file(repository_path, file_path):
+    """Получает коммиты, связанные с файлом, по его пути."""
+    print(f"Repository Path: {repository_path}")
+    print(f"File Path: {file_path}")
 
-    if not valid_commits:
-        print("No valid commits found for the specified file.")
+    # Формируем путь к объекту файла
+    full_file_path = os.path.join(repository_path, file_path)
+    if not os.path.exists(full_file_path):
+        print(f"Error: The file {full_file_path} does not exist in the repository.")
         return []
 
-    return valid_commits
+    # Ищем коммиты, связанные с файлом
+    commits = []
+    for root, dirs, files in os.walk(os.path.join(repository_path, '.git', 'objects')):
+        for file in files:
+            if file.endswith('.idx'):
+                continue
+            object_file = os.path.join(root, file)
+            with open(object_file, 'rb') as f:
+                data = f.read()
+                try:
+                    object_content = decompress_object(data)
+                    if file_path in object_content:
+                        commit_hash = os.path.basename(root) + file
+                        commit_info = get_commit_info(repository_path, commit_hash)
+                        if commit_info:
+                            commits.append(commit_info)
+                except zlib.error:
+                    continue
 
+    return commits
 
 def save_output(output_path, graph_code):
     """Сохраняет граф в файл."""
@@ -55,7 +95,7 @@ def save_output(output_path, graph_code):
     with open(output_path, 'w') as file:
         file.write(graph_code)
     print(f"Graph saved to {output_path}")
-
+    print(graph_code)
 
 def build_dependency_graph(commits):
     """Строит граф зависимостей для полученных коммитов."""
@@ -68,21 +108,20 @@ def build_dependency_graph(commits):
 
     return graph
 
-
 def main():
     # Загрузим конфигурацию
     config = load_config('config.yaml')
 
     repository_path = config['repository_path']
-    file_hash_or_path = config['file_hash']  # Это может быть как хеш, так и путь к файлу
+    file_path = config['file_hash']  # Это путь к файлу
     output_path = config['output_path']
 
     if not os.path.isdir(repository_path):
         print(f"Error: The repository path {repository_path} is not valid.")
         return
 
-    # Получаем коммиты для файла (по хешу или пути)
-    commits = get_commits_with_file(repository_path, file_hash_or_path)
+    # Получаем коммиты для файла (по пути)
+    commits = get_commits_with_file(repository_path, file_path)
 
     if commits:
         # Строим граф зависимости для найденных коммитов
@@ -91,8 +130,7 @@ def main():
         # Сохраняем граф в файл
         save_output(output_path, graph)
     else:
-        print("No commits found for the specified file.")
-
+        print("No commits found for the specified file path.")
 
 if __name__ == '__main__':
     main()
